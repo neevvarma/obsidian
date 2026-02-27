@@ -1,28 +1,121 @@
+import time
 import numpy as np
 import pandas as pd
 import streamlit as st
+from pathlib import Path
+from PIL import Image
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-st.set_page_config(
-    page_title="Obsidian – Business Q&A (Texas)",
-    page_icon="📘",
-    layout="centered",
+# -----------------------------
+# Page config
+# -----------------------------
+st.set_page_config(page_title="Obsidian", page_icon="🪨", layout="centered")
+
+# -----------------------------
+# Obsidian theme (CSS)
+# -----------------------------
+st.markdown(
+    """
+    <style>
+      /* page background */
+      html, body, [class*="stApp"] {
+        background: radial-gradient(1200px 600px at 50% 0%, #121318 0%, #07070A 60%, #000000 100%) !important;
+        color: #E7E7E7 !important;
+      }
+
+      /* container width */
+      .block-container { max-width: 980px; padding-top: 1.2rem; }
+
+      /* remove some default padding around chat input */
+      section.main > div { padding-bottom: 3.5rem; }
+
+      /* headers */
+      .opc-header {
+        display:flex; align-items:center; justify-content:space-between;
+        gap:14px; margin: 0.25rem 0 1rem 0;
+      }
+      .opc-title { font-size: 1.25rem; font-weight: 800; letter-spacing: 0.6px; }
+      .opc-sub { font-size: 0.92rem; color: rgba(220,220,220,0.7); margin-top: 0.15rem; }
+      .badge {
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(255,255,255,0.06);
+        padding: 6px 10px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        color: rgba(240,240,240,0.85);
+      }
+
+      /* chat bubbles: make them feel like ChatGPT */
+      [data-testid="stChatMessage"] {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 18px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      }
+
+      /* user message slightly different */
+      [data-testid="stChatMessage"][aria-label="user"] {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.14);
+      }
+
+      /* links */
+      a { color: #D7D7D7 !important; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      /* sidebar */
+      [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)) !important;
+        border-right: 1px solid rgba(255,255,255,0.08);
+      }
+
+      /* buttons */
+      .stButton button {
+        background: rgba(255,255,255,0.10) !important;
+        border: 1px solid rgba(255,255,255,0.18) !important;
+        color: #F0F0F0 !important;
+        border-radius: 12px !important;
+      }
+      .stButton button:hover {
+        background: rgba(255,255,255,0.14) !important;
+        border: 1px solid rgba(255,255,255,0.24) !important;
+      }
+
+      /* inputs */
+      input, textarea {
+        background: rgba(255,255,255,0.06) !important;
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        color: #F0F0F0 !important;
+        border-radius: 12px !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 # -----------------------------
-# In-code knowledge base (from your PDF)
+# Load logo (optional, but recommended)
+# -----------------------------
+LOGO_PATH = Path(__file__).parent / "logo.png"
+
+# -----------------------------
+# Knowledge base (your current prompts)
 # -----------------------------
 KB = [
     {
         "id": "llc-texas",
         "category": "Business Setup & Management",
         "question": "How do I properly set up an LLC in Texas?",
-        "answer": """1. Choose a unique business name (including an LLC designator) and check availability.
-2. File a Certificate of Formation – Limited Liability Company (Form 205) with the Texas Secretary of State (“SOS”). The form is designed to satisfy the requirements of the Texas Business Organizations Code (TBOC), Title 3, Chapter 101.
-3. Designate a registered agent and registered office in Texas, as required by TBOC (Title 1, Chapter 5).
-4. (Strongly recommended though not always legally required) Draft a Company Agreement (operating agreement) to govern internal affairs and structure of the LLC.
-5. After filing and approval, maintain statutory records (e.g., membership records) and meet ongoing obligations (such as franchise tax filings with the Texas Comptroller of Public Accounts).""",
+        "answer": (
+            "Step 1: Choose a unique business name (including an LLC designator) and check availability.\n"
+            "Step 2: File a Certificate of Formation – Limited Liability Company (Form 205) with the Texas Secretary of State (SOS).\n"
+            "Step 3: Designate a registered agent and registered office in Texas.\n"
+            "Step 4: Draft a Company/Operating Agreement to govern internal affairs (strongly recommended).\n"
+            "Step 5: Maintain statutory records and meet ongoing obligations such as Texas franchise tax filings."
+        ),
         "sources": [
             "https://www.sos.state.tx.us/corp/forms/205_boc.pdf?utm_source=chatgpt.com",
             "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
@@ -32,180 +125,211 @@ KB = [
         "id": "legal-steps-start-business",
         "category": "Business Setup & Management",
         "question": "What legal steps do I need to take to start my business?",
-        "answer": """At a high level, the legal steps include:
-- Decide on the appropriate business entity (LLC, corporation, partnership). The SOS provides guidance distinguishing structures.
-- If forming a domestic entity, file the required formation document (e.g., Certificate of Formation) with the Texas SOS for the chosen entity type.
-- Ensure you have a registered agent and registered office in Texas (TBOC Title 1, Chapter 5).
-- For corporations, adopt bylaws; for LLCs, draft a company/operating agreement.
-- Issue evidences of ownership (e.g., membership interest, stock) as required by the entity type.
-- Obtain any required federal employer identification number (EIN) from the IRS.
-- Comply with state filings, tax registrations (e.g., sales tax, franchise tax), local licenses/permits, and other regulatory obligations.""",
-        "sources": [],
+        "answer": (
+            "Pick the right entity type, file the formation paperwork if needed, maintain a registered agent/office, "
+            "prepare governance documents (operating agreement/bylaws), obtain an EIN, and complete applicable tax registrations, "
+            "licenses/permits, and ongoing filings."
+        ),
+        "sources": [
+            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
+        ],
     },
     {
         "id": "business-license-dfw",
         "category": "Business Setup & Management",
         "question": "Do I need a business license in DFW?",
-        "answer": """TBOC does not govern local business licenses. Whether you need a business license in the Dallas–Fort Worth (DFW) area depends on the city or county jurisdiction and on your industry type (e.g., health services, food, construction). You will need to check:
-- The specific city’s (e.g., Dallas or Fort Worth) business license/permit requirements.
-- Any state regulatory licensing if your business activity triggers a state-licensing agency (e.g., professional services).""",
+        "answer": (
+            "It depends on the city/county and your industry. Texas entity formation is separate from local licensing, "
+            "so check the specific city (Dallas/Fort Worth/etc.) and any state agency rules tied to your business activity."
+        ),
         "sources": [],
     },
     {
         "id": "management-system-team-organized",
         "category": "Business Setup & Management",
         "question": "What management system is best for keeping my team organized?",
-        "answer": """There is no single “best” system mandated by law. From a legal perspective under TBOC you must maintain certain records and governance procedures:
-- For LLCs: maintain records of members, capital contributions, distributions, and amendments as required by TBOC Title 3, Chapter 101.
-- For corporations: maintain minute books, shareholder records, and stock transfer records as required under TBOC Title 2.
-
-In practice, many businesses use project-management or collaboration tools (e.g., Asana, Trello, Slack) together with a secure document repository for legal records.""",
+        "answer": (
+            "There’s no single required system. Keep required legal records organized, and operationally use a project tracker "
+            "(Asana/Trello), team comms (Slack), and a secure document repository for official records."
+        ),
         "sources": [],
     },
     {
         "id": "stay-compliant-state-federal",
         "category": "Business Setup & Management",
         "question": "How do I make sure my business stays compliant with state and federal laws?",
-        "answer": """From the state entity-law side (TBOC):
-- Keep your entity’s registration current, including the registered agent and registered office (TBOC Title 1, Chapter 5).
-- File amendments or changes when required (e.g., change of registered agent, change of entity name).
-- Hold any required meetings (corporation) or document decisions (LLC) and keep records.
-- Ensure you act within the powers granted to the entity by its governing documents and the law (TBOC Title 1, Chapter 2 covers general powers).
-
-From the federal side:
-- Comply with IRS rules for federal taxes (income tax, employment tax, self-employment tax).
-- Comply with federal labor laws (e.g., Fair Labor Standards Act), employment tax withholding, and worker-classification rules.""",
-        "sources": [],
+        "answer": (
+            "Keep your registered agent/office current, document key decisions, maintain required records, file required state reports "
+            "(including franchise tax where applicable), and comply with federal tax/employment rules relevant to your business."
+        ),
+        "sources": [
+            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
+        ],
     },
     {
         "id": "insurance-needed-start-business",
         "category": "Business Setup & Management",
         "question": "What insurance do I need when starting a business?",
-        "answer": """TBOC does not specify insurance requirements. Insurance needs depend on your specific operations, risk profile, industry, and jurisdiction. Common insurance types to consider include:
-- General liability
-- Professional liability (errors & omissions)
-- Workers’ compensation (if you have employees and state law requires it)
-- Property insurance
-- Business interruption insurance
-
-You should also check:
-- Whether your industry is regulated and mandates certain coverages.
-- Lease or contract obligations that may require insurance.
-- Any state or local laws (e.g., workers’ compensation rules) that mandate coverage.""",
+        "answer": (
+            "It depends on operations and risk. Common coverages include general liability, professional liability, property coverage, "
+            "workers’ comp (if applicable), and cyber coverage if you handle sensitive data."
+        ),
         "sources": [],
     },
     {
         "id": "business-start-checklist",
         "category": "Business Setup & Management",
         "question": "Can you create a checklist for starting my business the right way?",
-        "answer": """Here is a business start checklist focused on legal formation and compliance (you should add operations, marketing, etc., as needed):
-
-1. Choose a business structure (LLC, corporation, partnership) and understand legal differences.
-2. Choose a business name and check availability in Texas (SOS entity name search).
-3. Designate a registered agent and registered office in Texas.
-4. File the appropriate Certificate of Formation with the Texas SOS (for LLC: Form 205) under TBOC Title 3, Chapter 101.
-5. Draft internal governance documents:
-   - LLC: Company/Operating Agreement
-   - Corporation: Bylaws and any shareholder agreements
-6. Issue ownership interests (membership interests or shares) as required by the entity type.
-7. Obtain an EIN from the IRS.
-8. Register for relevant state taxes (e.g., franchise tax) and sales tax if applicable.
-9. Apply for all required local and state licenses and permits.
-10. Open a business bank account.
-11. Set up bookkeeping and accounting systems.
-12. Purchase business insurance appropriate for your operations.
-13. Set up payroll (if you will have employees) and related compliance processes.
-14. Maintain entity compliance:
-   - Keep the registered agent and office up to date
-   - File amendments as needed
-   - Keep required records and books
-   - Follow entity-governance rules under TBOC.""",
-        "sources": [],
+        "answer": (
+            "Checklist: choose entity → choose/check name → appoint registered agent/office → file formation (LLC: Form 205) → "
+            "draft operating agreement/bylaws → get EIN → open bank account → set up accounting → tax registrations "
+            "(franchise/sales if applicable) → licenses/permits → insurance → maintain records & ongoing filings."
+        ),
+        "sources": [
+            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
+            "https://www.sos.state.tx.us/corp/forms/205_boc.pdf?utm_source=chatgpt.com",
+        ],
     },
 ]
 
 # -----------------------------
-# Build TF–IDF index over question + answer text
+# Retrieval (TF-IDF)
 # -----------------------------
-from typing import List, Tuple
-
-texts = [item["question"] + " " + item["answer"] for item in KB]
-
+texts = [f"{x['question']} {x['answer']}" for x in KB]
 vectorizer = TfidfVectorizer(
     stop_words="english",
     ngram_range=(1, 2),
     sublinear_tf=True,
     max_df=0.95,
 )
-
 doc_vectors = vectorizer.fit_transform(texts)
 
-
-def retrieve(query: str, top_k: int = 3) -> List[Tuple[int, float]]:
-    """Return indices + scores for the top_k most similar Q&A entries."""
+def retrieve(query: str, top_k: int = 3):
     if not query.strip():
         return []
     q_vec = vectorizer.transform([query])
     sims = cosine_similarity(q_vec, doc_vectors)[0]
     order = np.argsort(-sims)
-    hits = [(int(i), float(sims[int(i)])) for i in order[:top_k] if sims[int(i)] > 0]
-    return hits
+    return [(int(i), float(sims[int(i)])) for i in order[:top_k] if sims[int(i)] > 0]
 
+def thinking_dots(seconds: float = 0.9):
+    spot = st.empty()
+    start = time.time()
+    dots = ["", ".", "..", "..."]
+    i = 0
+    while time.time() - start < seconds:
+        spot.markdown(f"**Thinking{dots[i % 4]}**")
+        time.sleep(0.18)
+        i += 1
+    spot.empty()
+
+def stream_response(text: str, delay: float = 0.018):
+    box = st.empty()
+    out = ""
+    for token in text.split(" "):
+        out += token + " "
+        box.markdown(out)
+        time.sleep(delay)
 
 # -----------------------------
-# UI
+# Session state chat history
 # -----------------------------
-st.title("ATLAS (Advisory, Texas, Legal, Assistance, System)")
-st.caption(
-    "Ask a question. The app finds the closest curated prompt and returns the exact answer from your knowledge base."
-)
+if "messages" not in st.session_state:
+    st.session_state.messages = [{
+        "role": "assistant",
+        "content": "Hi — I’m **Obsidian**. Ask a Texas business formation/compliance question and I’ll answer from our curated knowledge base."
+    }]
 
-default_q = "How do I properly set up an LLC in Texas?"
-q = st.text_input("Ask a question:", value=default_q)
+# -----------------------------
+# Header + logo
+# -----------------------------
+left, right = st.columns([1, 3], vertical_alignment="center")
+with left:
+    if LOGO_PATH.exists():
+        img = Image.open(LOGO_PATH)
+        st.image(img, use_container_width=True)
+with right:
+    st.markdown(
+        """
+        <div class="opc-header">
+          <div>
+            <div class="opc-title">Obsidian</div>
+            <div class="opc-sub">Obsidian Partners & Co. • AI-style advisor • Curated answers • Not legal advice</div>
+          </div>
+          <div class="badge">🧠 Obsidian-Reasoner</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-top_k = st.slider("Show top matches", min_value=1, max_value=5, value=3)
+# -----------------------------
+# Sidebar controls
+# -----------------------------
+with st.sidebar:
+    st.markdown("### Controls")
+    top_k = st.slider("Retriever: top_k", 1, 5, 3)
+    show_debug = st.toggle("Show retrieval details", value=False)
+    st.markdown("---")
+    if st.button("Clear chat"):
+        st.session_state.messages = st.session_state.messages[:1]
+        st.rerun()
 
-if st.button("Generate answer", type="primary"):
-    hits = retrieve(q, top_k=top_k)
+# -----------------------------
+# Render chat messages
+# -----------------------------
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    if not hits:
-        st.warning("No close matches found in the knowledge base. Try rephrasing your question.")
-    else:
-        best_idx, best_score = hits[0]
-        best = KB[best_idx]
+# -----------------------------
+# Chat input (ChatGPT style)
+# -----------------------------
+prompt = st.chat_input("Message Obsidian…")
 
-        st.markdown("### Matched prompt")
-        st.markdown(f"**{best['question']}**")
-        if best.get("category"):
-            st.caption(f"Category: {best['category']} · similarity score: {best_score:.3f}")
+if prompt:
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        # Thinking indicator
+        with st.spinner("Thinking…"):
+            thinking_dots(0.9)
+
+        hits = retrieve(prompt, top_k=top_k)
+        if not hits:
+            final = "I couldn’t find a close match in the current knowledge base. Try rephrasing or ask one of the supported prompts."
+            st.markdown(final)
+            st.session_state.messages.append({"role": "assistant", "content": final})
         else:
-            st.caption(f"Similarity score: {best_score:.3f}")
+            best_idx, best_score = hits[0]
+            item = KB[best_idx]
 
-        st.markdown("### Answer")
-        st.markdown(best["answer"])
+            # Stream response like ChatGPT
+            stream_response(item["answer"], delay=0.016)
 
-        st.markdown("### Sources")
-        if best["sources"]:
-            for url in best["sources"]:
-                st.markdown(f"- [{url}]({url})")
-        else:
-            st.write("_No specific source links stored for this prompt._")
+            # Sources footer
+            sources = item.get("sources", [])
+            if sources:
+                st.markdown("**Sources**")
+                for url in sources:
+                    st.markdown(f"- [{url}]({url})")
 
-        if len(hits) > 1:
-            rows = []
-            for rank, (idx, score) in enumerate(hits, start=1):
-                item = KB[idx]
-                rows.append(
-                    {
-                        "Rank": rank,
-                        "Question": item["question"],
-                        "Category": item["category"],
+            # Debug (optional)
+            if show_debug:
+                rows = []
+                for r, (idx, score) in enumerate(hits, start=1):
+                    rows.append({
+                        "Rank": r,
+                        "Question": KB[idx]["question"],
+                        "Category": KB[idx].get("category", ""),
                         "Score": round(score, 3),
-                    }
-                )
-            df = pd.DataFrame(rows)
-            st.markdown("### Other close matches")
-            st.dataframe(df, use_container_width=True)
+                    })
+                st.markdown("**Retrieval details**")
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-st.markdown("---")
-st.caption("To add more prompts and answers, extend the KB list at the top of `app.py`.")
+            # Save assistant message to history
+            stored = item["answer"]
+            if sources:
+                stored += "\n\n**Sources**\n" + "\n".join([f"- {s}" for s in sources])
+            st.session_state.messages.append({"role": "assistant", "content": stored})
