@@ -1,36 +1,31 @@
+import re
 import time
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import streamlit as st
-from pathlib import Path
 from PIL import Image
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# -----------------------------
-# Page config
-# -----------------------------
+
+# =========================================================
+# Page config + theme
+# =========================================================
 st.set_page_config(page_title="Obsidian", page_icon="🪨", layout="centered")
 
-# -----------------------------
-# Obsidian theme (CSS)
-# -----------------------------
 st.markdown(
     """
     <style>
-      /* page background */
       html, body, [class*="stApp"] {
         background: radial-gradient(1200px 600px at 50% 0%, #121318 0%, #07070A 60%, #000000 100%) !important;
         color: #E7E7E7 !important;
       }
+      .block-container { max-width: 980px; padding-top: 1.1rem; }
+      section.main > div { padding-bottom: 4.5rem; }
 
-      /* container width */
-      .block-container { max-width: 980px; padding-top: 1.2rem; }
-
-      /* remove some default padding around chat input */
-      section.main > div { padding-bottom: 3.5rem; }
-
-      /* headers */
       .opc-header {
         display:flex; align-items:center; justify-content:space-between;
         gap:14px; margin: 0.25rem 0 1rem 0;
@@ -46,7 +41,6 @@ st.markdown(
         color: rgba(240,240,240,0.85);
       }
 
-      /* chat bubbles: make them feel like ChatGPT */
       [data-testid="stChatMessage"] {
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.10);
@@ -55,206 +49,308 @@ st.markdown(
         margin-bottom: 10px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.35);
       }
-
-      /* user message slightly different */
       [data-testid="stChatMessage"][aria-label="user"] {
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(255,255,255,0.07);
+        border: 1px solid rgba(255,255,255,0.16);
       }
 
-      /* links */
       a { color: #D7D7D7 !important; text-decoration: none; }
       a:hover { text-decoration: underline; }
 
-      /* sidebar */
       [data-testid="stSidebar"] {
         background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02)) !important;
         border-right: 1px solid rgba(255,255,255,0.08);
       }
 
-      /* buttons */
-      .stButton button {
-        background: rgba(255,255,255,0.10) !important;
-        border: 1px solid rgba(255,255,255,0.18) !important;
-        color: #F0F0F0 !important;
-        border-radius: 12px !important;
-      }
-      .stButton button:hover {
-        background: rgba(255,255,255,0.14) !important;
-        border: 1px solid rgba(255,255,255,0.24) !important;
-      }
+      .hint { color: rgba(230,230,230,0.72); font-size: 0.92rem; }
+      .small { color: rgba(230,230,230,0.70); font-size: 0.86rem; }
+      .divider { height: 1px; background: rgba(255,255,255,0.08); margin: 10px 0; }
 
-      /* inputs */
-      input, textarea {
-        background: rgba(255,255,255,0.06) !important;
+      .stButton button {
+        background: rgba(255,255,255,0.08) !important;
         border: 1px solid rgba(255,255,255,0.14) !important;
         color: #F0F0F0 !important;
-        border-radius: 12px !important;
+        border-radius: 999px !important;
+        padding: 0.4rem 0.9rem !important;
+        width: 100%;
+      }
+      .stButton button:hover {
+        background: rgba(255,255,255,0.12) !important;
+        border: 1px solid rgba(255,255,255,0.22) !important;
       }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# -----------------------------
-# Load logo (optional, but recommended)
-# -----------------------------
-LOGO_PATH = Path(__file__).parent / "logo.png"
+APP_DIR = Path(__file__).parent
+DATA_DIR = APP_DIR / "data"
+LOGO_PATH = APP_DIR / "logo.png"  # optional
 
-# -----------------------------
-# Knowledge base (your current prompts)
-# -----------------------------
-KB = [
-    {
-        "id": "llc-texas",
-        "category": "Business Setup & Management",
-        "question": "How do I properly set up an LLC in Texas?",
-        "answer": (
-            "Step 1: Choose a unique business name (including an LLC designator) and check availability.\n"
-            "Step 2: File a Certificate of Formation – Limited Liability Company (Form 205) with the Texas Secretary of State (SOS).\n"
-            "Step 3: Designate a registered agent and registered office in Texas.\n"
-            "Step 4: Draft a Company/Operating Agreement to govern internal affairs (strongly recommended).\n"
-            "Step 5: Maintain statutory records and meet ongoing obligations such as Texas franchise tax filings."
-        ),
-        "sources": [
-            "https://www.sos.state.tx.us/corp/forms/205_boc.pdf?utm_source=chatgpt.com",
-            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
-        ],
-    },
-    {
-        "id": "legal-steps-start-business",
-        "category": "Business Setup & Management",
-        "question": "What legal steps do I need to take to start my business?",
-        "answer": (
-            "Pick the right entity type, file the formation paperwork if needed, maintain a registered agent/office, "
-            "prepare governance documents (operating agreement/bylaws), obtain an EIN, and complete applicable tax registrations, "
-            "licenses/permits, and ongoing filings."
-        ),
-        "sources": [
-            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
-        ],
-    },
-    {
-        "id": "business-license-dfw",
-        "category": "Business Setup & Management",
-        "question": "Do I need a business license in DFW?",
-        "answer": (
-            "It depends on the city/county and your industry. Texas entity formation is separate from local licensing, "
-            "so check the specific city (Dallas/Fort Worth/etc.) and any state agency rules tied to your business activity."
-        ),
-        "sources": [],
-    },
-    {
-        "id": "management-system-team-organized",
-        "category": "Business Setup & Management",
-        "question": "What management system is best for keeping my team organized?",
-        "answer": (
-            "There’s no single required system. Keep required legal records organized, and operationally use a project tracker "
-            "(Asana/Trello), team comms (Slack), and a secure document repository for official records."
-        ),
-        "sources": [],
-    },
-    {
-        "id": "stay-compliant-state-federal",
-        "category": "Business Setup & Management",
-        "question": "How do I make sure my business stays compliant with state and federal laws?",
-        "answer": (
-            "Keep your registered agent/office current, document key decisions, maintain required records, file required state reports "
-            "(including franchise tax where applicable), and comply with federal tax/employment rules relevant to your business."
-        ),
-        "sources": [
-            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
-        ],
-    },
-    {
-        "id": "insurance-needed-start-business",
-        "category": "Business Setup & Management",
-        "question": "What insurance do I need when starting a business?",
-        "answer": (
-            "It depends on operations and risk. Common coverages include general liability, professional liability, property coverage, "
-            "workers’ comp (if applicable), and cyber coverage if you handle sensitive data."
-        ),
-        "sources": [],
-    },
-    {
-        "id": "business-start-checklist",
-        "category": "Business Setup & Management",
-        "question": "Can you create a checklist for starting my business the right way?",
-        "answer": (
-            "Checklist: choose entity → choose/check name → appoint registered agent/office → file formation (LLC: Form 205) → "
-            "draft operating agreement/bylaws → get EIN → open bank account → set up accounting → tax registrations "
-            "(franchise/sales if applicable) → licenses/permits → insurance → maintain records & ongoing filings."
-        ),
-        "sources": [
-            "https://www.sos.state.tx.us/corp/businessstructure.shtml?utm_source=chatgpt.com",
-            "https://www.sos.state.tx.us/corp/forms/205_boc.pdf?utm_source=chatgpt.com",
-        ],
-    },
-]
+QA_CSV = DATA_DIR / "kb_qa.csv"
+CHUNKS_CSV = DATA_DIR / "kb_chunks.csv"
 
-# -----------------------------
-# Retrieval (TF-IDF)
-# -----------------------------
-texts = [f"{x['question']} {x['answer']}" for x in KB]
-vectorizer = TfidfVectorizer(
-    stop_words="english",
-    ngram_range=(1, 2),
-    sublinear_tf=True,
-    max_df=0.95,
-)
-doc_vectors = vectorizer.fit_transform(texts)
 
-def retrieve(query: str, top_k: int = 3):
-    if not query.strip():
+# =========================================================
+# Small helpers
+# =========================================================
+def safe_str(x) -> str:
+    return "" if x is None else str(x)
+
+def parse_pipe_list(value: str):
+    if not isinstance(value, str):
         return []
-    q_vec = vectorizer.transform([query])
-    sims = cosine_similarity(q_vec, doc_vectors)[0]
+    return [x.strip() for x in value.split("|") if x.strip()]
+
+def is_url(s: str) -> bool:
+    return s.startswith("http://") or s.startswith("https://")
+
+def normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+def split_sentences(text: str):
+    # simple + robust enough for PDFs
+    text = normalize(text)
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if len(p.strip()) > 18]
+
+# Simple "human intent"
+GREETING_PAT = re.compile(r"\b(hi|hello|hey|yo|good morning|good afternoon|good evening)\b", re.I)
+HELP_PAT = re.compile(r"\b(help|what can you do|how do i use this|what should i ask)\b", re.I)
+THANKS_PAT = re.compile(r"\b(thanks|thank you|thx|appreciate it)\b", re.I)
+
+def detect_intent(text: str) -> str:
+    t = (text or "").strip()
+    if not t:
+        return "empty"
+    if THANKS_PAT.search(t):
+        return "thanks"
+    if HELP_PAT.search(t):
+        return "help"
+    if GREETING_PAT.search(t):
+        return "greeting"
+    return "query"
+
+
+# =========================================================
+# Load data
+# =========================================================
+@st.cache_data(show_spinner=False)
+def load_qa_df(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path).fillna("")
+    for col in ["id", "category", "question", "answer", "sources", "source_pages", "followups"]:
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+@st.cache_data(show_spinner=False)
+def load_chunks_df(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path).fillna("")
+    for col in ["chunk_id", "doc_title", "section", "page_start", "page_end", "text", "source_url"]:
+        if col not in df.columns:
+            df[col] = ""
+    return df
+
+if not QA_CSV.exists() or not CHUNKS_CSV.exists():
+    st.error(
+        "Missing CSV files.\n\nExpected:\n- data/kb_qa.csv\n- data/kb_chunks.csv\n\n"
+        "Fix: put both files in the repo under /data and restart."
+    )
+    st.stop()
+
+qa_df = load_qa_df(QA_CSV)
+chunks_df = load_chunks_df(CHUNKS_CSV)
+
+
+# =========================================================
+# Build vector indexes (fast + cached)
+# =========================================================
+@st.cache_resource(show_spinner=False)
+def build_index_for_qa(df: pd.DataFrame):
+    texts = (df["category"].astype(str) + " " + df["question"].astype(str) + " " + df["answer"].astype(str)).tolist()
+    vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), sublinear_tf=True, max_df=0.95)
+    mat = vec.fit_transform(texts)
+    return vec, mat
+
+@st.cache_resource(show_spinner=False)
+def build_index_for_chunks(df: pd.DataFrame):
+    texts = (df["doc_title"].astype(str) + " " + df["text"].astype(str)).tolist()
+    vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), sublinear_tf=True, max_df=0.95)
+    mat = vec.fit_transform(texts)
+    return vec, mat
+
+qa_vec, qa_mat = build_index_for_qa(qa_df)
+chunk_vec, chunk_mat = build_index_for_chunks(chunks_df)
+
+def retrieve(vec, mat, query: str, top_k: int):
+    query = normalize(query)
+    if not query:
+        return []
+    qv = vec.transform([query])
+    sims = cosine_similarity(qv, mat)[0]
     order = np.argsort(-sims)
-    return [(int(i), float(sims[int(i)])) for i in order[:top_k] if sims[int(i)] > 0]
+    hits = [(int(i), float(sims[int(i)])) for i in order[:top_k]]
+    return hits
 
-def thinking_dots(seconds: float = 0.9):
-    spot = st.empty()
-    start = time.time()
-    dots = ["", ".", "..", "..."]
-    i = 0
-    while time.time() - start < seconds:
-        spot.markdown(f"**Thinking{dots[i % 4]}**")
-        time.sleep(0.18)
-        i += 1
-    spot.empty()
 
-def stream_response(text: str, delay: float = 0.018):
-    box = st.empty()
-    out = ""
-    for token in text.split(" "):
-        out += token + " "
-        box.markdown(out)
-        time.sleep(delay)
+# =========================================================
+# Answer formatting
+# =========================================================
+def render_sources_block(sources: list[str], pages: str = "") -> str:
+    if not sources and not pages:
+        return ""
+    out = "**Sources**\n"
+    for s in sources:
+        if is_url(s):
+            out += f"- [{s}]({s})\n"
+        else:
+            out += f"- {s}\n"
+    if pages.strip():
+        out += f"\n<span class='small'>Pages: {pages.strip()}</span>"
+    return out
 
-# -----------------------------
-# Session state chat history
-# -----------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = [{
-        "role": "assistant",
-        "content": "Hi — I’m **Obsidian**. Ask a Texas business formation/compliance question and I’ll answer from our curated knowledge base."
-    }]
+def qa_answer(row: pd.Series) -> tuple[str, str]:
+    answer = safe_str(row["answer"]).strip()
+    sources = parse_pipe_list(safe_str(row.get("sources", "")))
+    pages = safe_str(row.get("source_pages", ""))
+    return answer, render_sources_block(sources, pages)
 
-# -----------------------------
-# Header + logo
-# -----------------------------
+def doc_summarize_answer(query: str, chunk_hits: list[tuple[int, float]], max_chunks: int = 5) -> tuple[str, str]:
+    """
+    Create a coherent answer that addresses the question:
+    - take top chunks
+    - extract top sentences relevant to query
+    - format as step-by-step
+    """
+    if not chunk_hits:
+        return (
+            "I couldn’t find anything relevant in the current documents yet. Try rephrasing your question.",
+            ""
+        )
+
+    picked = [i for i, _ in chunk_hits[:max_chunks]]
+    texts = []
+    cite_lines = []
+
+    for rank, idx in enumerate(picked, start=1):
+        row = chunks_df.iloc[idx]
+        txt = safe_str(row["text"])
+        texts.append(txt)
+
+        doc = safe_str(row["doc_title"]).strip()
+        p1 = safe_str(row.get("page_start", "")).strip()
+        p2 = safe_str(row.get("page_end", "")).strip()
+        if p1 and p2 and p1 != p2:
+            cite_lines.append(f"[{rank}] {doc} (pp. {p1}-{p2})")
+        elif p1:
+            cite_lines.append(f"[{rank}] {doc} (p. {p1})")
+        else:
+            cite_lines.append(f"[{rank}] {doc}")
+
+    # Sentence scoring using a small TF-IDF over candidate sentences
+    sentences = []
+    for t in texts:
+        sentences.extend(split_sentences(t))
+
+    # Guard
+    sentences = [s for s in sentences if 30 <= len(s) <= 260]
+    if not sentences:
+        return (
+            "I found relevant material, but it wasn’t extractable cleanly. Try asking more specifically (e.g., “LLC steps in Texas”).",
+            "**Sources (internal)**\n" + "\n".join([f"- {c}" for c in cite_lines])
+        )
+
+    local_vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), sublinear_tf=True, max_df=0.98)
+    smat = local_vec.fit_transform(sentences + [query])
+    qv = smat[-1]
+    sent_mat = smat[:-1]
+    sims = cosine_similarity(qv, sent_mat)[0]
+    order = np.argsort(-sims)
+
+    # Pick best distinct sentences
+    chosen = []
+    used = set()
+    for i in order:
+        s = sentences[int(i)]
+        key = s[:60]
+        if key in used:
+            continue
+        if sims[int(i)] < 0.05:
+            break
+        chosen.append(s)
+        used.add(key)
+        if len(chosen) >= 6:
+            break
+
+    # Turn into steps that actually address the query
+    steps = []
+    for n, s in enumerate(chosen[:5], start=1):
+        # make it slightly more instructional
+        s_clean = s
+        if not s_clean.endswith((".", "!", "?")):
+            s_clean += "."
+        steps.append(f"**Step {n}:** {s_clean}")
+
+    answer = "\n\n".join(steps)
+    cites = "**Sources (internal citations)**\n" + "\n".join([f"- {c}" for c in cite_lines])
+    return answer, cites
+
+
+# =========================================================
+# Suggestions (prompt chips)
+# =========================================================
+@st.cache_data(show_spinner=False)
+def get_recommended_prompts(df: pd.DataFrame, n=8):
+    qs = [q for q in df["question"].astype(str).tolist() if q.strip()]
+    # pick short, high-coverage prompts
+    qs = sorted(qs, key=lambda x: len(x))[: max(n * 3, 10)]
+    priority = [
+        "How do I properly set up an LLC in Texas?",
+        "What are the main steps to start a business in Texas?",
+        "Do I need a registered agent in Texas?",
+        "What is the Texas franchise tax and when is it due?",
+    ]
+    out = []
+    for p in priority:
+        if p in qs and p not in out:
+            out.append(p)
+    for q in qs:
+        if q not in out:
+            out.append(q)
+        if len(out) >= n:
+            break
+    return out
+
+RECOMMENDED = get_recommended_prompts(qa_df, n=8)
+
+def render_prompt_chips(prompts: list[str]):
+    if not prompts:
+        return
+    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+    st.markdown("<div class='hint'><b>Try one of these:</b></div>", unsafe_allow_html=True)
+    cols = st.columns(2)
+    for i, p in enumerate(prompts):
+        with cols[i % 2]:
+            if st.button(p, key=f"chip_{i}"):
+                st.session_state.pending_prompt = p
+
+
+# =========================================================
+# Header + Sidebar
+# =========================================================
 left, right = st.columns([1, 3], vertical_alignment="center")
 with left:
     if LOGO_PATH.exists():
-        img = Image.open(LOGO_PATH)
-        st.image(img, use_container_width=True)
+        st.image(Image.open(LOGO_PATH), width="stretch")
 with right:
     st.markdown(
         """
         <div class="opc-header">
           <div>
             <div class="opc-title">Obsidian</div>
-            <div class="opc-sub">Obsidian Partners & Co. • AI-style advisor • Curated answers • Not legal advice</div>
+            <div class="opc-sub">Hybrid Advisor • Curated Q/A + Document RAG • Fast, helpful answers</div>
           </div>
           <div class="badge">🧠 Obsidian-Reasoner</div>
         </div>
@@ -262,74 +358,152 @@ with right:
         unsafe_allow_html=True,
     )
 
-# -----------------------------
-# Sidebar controls
-# -----------------------------
 with st.sidebar:
-    st.markdown("### Controls")
-    top_k = st.slider("Retriever: top_k", 1, 5, 3)
-    show_debug = st.toggle("Show retrieval details", value=False)
-    st.markdown("---")
+    st.markdown("### Retrieval Settings")
+    qa_top_k = st.slider("Q/A top_k", 1, 8, 4)
+    docs_top_k = st.slider("Docs top_k", 1, 10, 5)
+    use_docs_fallback = st.toggle("Use docs fallback (RAG)", value=True)
+    show_debug = st.toggle("Show debug (scores)", value=False)
+
+    st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
+    st.markdown("### What I’m good at")
+    st.markdown(
+        "- Texas business startup steps\n"
+        "- LLC basics + registered agent\n"
+        "- Tax/compliance basics (franchise tax, sales tax)\n"
+        "- Planning + roadmap concepts",
+    )
+
     if st.button("Clear chat"):
-        st.session_state.messages = st.session_state.messages[:1]
+        st.session_state.messages = []
+        st.session_state.pending_prompt = None
+        st.session_state.context = ""
         st.rerun()
 
-# -----------------------------
-# Render chat messages
-# -----------------------------
+
+# =========================================================
+# Session state
+# =========================================================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
+
+if "context" not in st.session_state:
+    st.session_state.context = ""
+
+
+# =========================================================
+# Input collection (typed OR clicked)
+# =========================================================
+typed = st.chat_input("Message Obsidian…")
+
+prompt = None
+if st.session_state.pending_prompt:
+    prompt = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
+elif typed:
+    prompt = typed
+
+
+# =========================================================
+# If we have a prompt, generate a GOOD answer (fast)
+# =========================================================
+if prompt:
+    prompt = normalize(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    intent = detect_intent(prompt)
+
+    # Minimal “thinking” (fast)
+    with st.spinner("Thinking…"):
+        time.sleep(0.15)
+
+    # Friendly handling
+    if intent in ("greeting", "help"):
+        msg = (
+            "Hey 👋 I can help you with Texas LLC formation and practical small-business setup.\n\n"
+            "Pick a prompt below, or ask in your own words (example: *“How do I set up an LLC in Texas?”*)."
+        )
+        st.session_state.messages.append({"role": "assistant", "content": msg})
+    elif intent == "thanks":
+        msg = "Anytime 🙂 Want to form an LLC, handle taxes, or plan your first 30 days? Pick a prompt below."
+        st.session_state.messages.append({"role": "assistant", "content": msg})
+    else:
+        # 1) Q/A retrieval (best for accuracy)
+        qa_hits = retrieve(qa_vec, qa_mat, prompt, qa_top_k)
+        best_idx, best_score = qa_hits[0]
+
+        # Tuned thresholds: prefer QA when we have a reasonable match
+        QA_USE_THRESHOLD = 0.16
+
+        if best_score >= QA_USE_THRESHOLD:
+            row = qa_df.iloc[best_idx]
+            answer, sources_block = qa_answer(row)
+
+            final = answer
+            if sources_block:
+                final += "\n\n" + sources_block
+
+            st.session_state.messages.append({"role": "assistant", "content": final})
+
+        else:
+            # 2) Docs fallback (better summarization, not random chunk dumping)
+            if use_docs_fallback:
+                doc_hits = retrieve(chunk_vec, chunk_mat, prompt, docs_top_k)
+                answer, cites = doc_summarize_answer(prompt, doc_hits, max_chunks=min(6, docs_top_k))
+
+                final = answer
+                if cites:
+                    final += "\n\n" + cites
+
+                st.session_state.messages.append({"role": "assistant", "content": final})
+            else:
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": "I’m not confident enough to answer from the current Q/A. Try turning on docs fallback in the sidebar."}
+                )
+
+    # Rerun once to render chat cleanly after appending messages
+    st.rerun()
+
+
+# =========================================================
+# Render conversation
+# =========================================================
+if not st.session_state.messages:
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": (
+                "Hey — I’m **Obsidian**.\n\n"
+                "Ask a question or click a prompt below. I’ll answer **step-by-step** and cite sources when available."
+            ),
+        }
+    )
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# -----------------------------
-# Chat input (ChatGPT style)
-# -----------------------------
-prompt = st.chat_input("Message Obsidian…")
 
-if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+# =========================================================
+# Prompt chips (always visible)
+# =========================================================
+render_prompt_chips(RECOMMENDED)
 
-    with st.chat_message("assistant"):
-        # Thinking indicator
-        with st.spinner("Thinking…"):
-            thinking_dots(0.9)
-
-        hits = retrieve(prompt, top_k=top_k)
-        if not hits:
-            final = "I couldn’t find a close match in the current knowledge base. Try rephrasing or ask one of the supported prompts."
-            st.markdown(final)
-            st.session_state.messages.append({"role": "assistant", "content": final})
-        else:
-            best_idx, best_score = hits[0]
-            item = KB[best_idx]
-
-            # Stream response like ChatGPT
-            stream_response(item["answer"], delay=0.016)
-
-            # Sources footer
-            sources = item.get("sources", [])
-            if sources:
-                st.markdown("**Sources**")
-                for url in sources:
-                    st.markdown(f"- [{url}]({url})")
-
-            # Debug (optional)
-            if show_debug:
-                rows = []
-                for r, (idx, score) in enumerate(hits, start=1):
-                    rows.append({
-                        "Rank": r,
-                        "Question": KB[idx]["question"],
-                        "Category": KB[idx].get("category", ""),
-                        "Score": round(score, 3),
-                    })
-                st.markdown("**Retrieval details**")
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-            # Save assistant message to history
-            stored = item["answer"]
-            if sources:
-                stored += "\n\n**Sources**\n" + "\n".join([f"- {s}" for s in sources])
-            st.session_state.messages.append({"role": "assistant", "content": stored})
+# Optional debug
+if show_debug and st.session_state.messages:
+    # show last QA retrieval info if last user message exists
+    last_user = next((m["content"] for m in reversed(st.session_state.messages) if m["role"] == "user"), "")
+    if last_user:
+        qa_hits = retrieve(qa_vec, qa_mat, last_user, qa_top_k)
+        dbg = []
+        for r, (idx, score) in enumerate(qa_hits, start=1):
+            dbg.append({
+                "Rank": r,
+                "Score": round(score, 3),
+                "Question": safe_str(qa_df.iloc[idx]["question"]),
+            })
+        st.markdown("**Debug (Top Q/A matches)**")
+        st.dataframe(pd.DataFrame(dbg), width="stretch", hide_index=True)

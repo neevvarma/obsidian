@@ -1,0 +1,42 @@
+[
+  {
+    "id": "sos-llc-overview",
+    "title": "Texas Secretary of State – LLC Overview",
+    "source": "Texas Secretary of State (general guidance)",
+    "bullets": [
+      "Choose a unique business name that includes an LLC designator; check name availability with the Secretary of State",
+      "File a Certificate of Formation – Limited Liability Company (Form 205) with the Texas Secretary of State",
+      "The Certificate of Formation must satisfy the Texas Business Organizations Code (TBOC), Title 3, Chapter 101 requirements",
+      "Designate a registered agent and registered office in Texas as required by TBOC (Title 1, Chapter 5)",
+      "Draft a Company Agreement (operating agreement) to govern internal affairs and ownership structure (strongly recommended)",
+      "Maintain statutory records (e.g., membership records) after formation and keep them up to date"
+    ]
+  },
+  {
+    "id": "tboc-ch101",
+    "title": "Texas Business Organizations Code – Title 3, Chapter 101",
+    "source": "TBOC Title 3, Chapter 101",
+    "bullets": [
+      "Chapter 101 contains core provisions governing Texas limited liability companies",
+      "Certificate of Formation content and organizational structure must align with Chapter 101"
+    ]
+  },
+  {
+    "id": "tboc-ch5",
+    "title": "Texas Business Organizations Code – Title 1, Chapter 5",
+    "source": "TBOC Title 1, Chapter 5",
+    "bullets": [
+      "Texas LLCs must appoint and continuously maintain a registered agent and registered office within the state",
+      "Service of process and official correspondence are delivered to the registered agent"
+    ]
+  },
+  {
+    "id": "comptroller-franchise",
+    "title": "Texas Comptroller – Franchise Tax Obligations",
+    "source": "Texas Comptroller of Public Accounts",
+    "bullets": [
+      "Most Texas LLCs have franchise tax responsibilities with the Comptroller and must file required reports",
+      "Ongoing compliance includes timely franchise tax filings and recordkeeping in accordance with Texas requirements"
+    ]
+  }
+]
